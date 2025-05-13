@@ -57,12 +57,18 @@ def get_conversational_chain():
 
 
 # Handle user question
-def handle_user_question(user_question):
+def handle_user_question(user_question, chat_history=[]):
     embeddings = GoogleGenerativeAIEmbeddings(
         google_api_key=GOOGLE_API_KEY, model="models/embedding-001"
     )
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     docs = new_db.similarity_search(user_question)
+
+    # Combine chat history into a single context string
+    history_context = "\n".join([f"User: {q}\nAI: {a}" for q, a in chat_history])
+    full_prompt = f"{history_context}\nUser: {user_question}" if history_context else user_question
+
     chain = get_conversational_chain()
-    response = chain({"input_documents": docs, "question": user_question}, return_only_outputs=True)
+    response = chain({"input_documents": docs, "question": full_prompt}, return_only_outputs=True)
     return response["output_text"]
+
