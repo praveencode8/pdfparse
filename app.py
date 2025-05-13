@@ -30,23 +30,49 @@ if mode == "📞 Audio Call Analysis":
                 if res['summary']:
                     st.markdown("📌 **Summary:**")
                     st.markdown(res['summary'])
-
 elif mode == "📄 PDF Chatbot":
     st.sidebar.subheader("Upload PDFs")
     pdf_files = st.sidebar.file_uploader("Upload one or more PDFs", type=["pdf"], accept_multiple_files=True)
+
+    # Initialize chat history
+    if "messages" not in st.session_state:
+        st.session_state.messages = []
 
     if st.sidebar.button("Submit & Process"):
         with st.spinner("📚 Reading PDFs..."):
             raw_text = get_pdf_text(pdf_files)
             text_chunks = get_text_chunks(raw_text)
             save_vector_store(text_chunks)
-        st.success("✅ PDFs processed! You can now ask questions below.")
+        st.success("✅ PDFs processed! You can now start chatting.")
+        st.session_state.messages = []  # Reset chat history on new upload
 
-    st.subheader("Ask a Question")
-    user_question = st.text_input("❓ Ask a question about the documents")
+    st.subheader("📨 Chat with your Documents")
 
-    if user_question:
-        with st.spinner("🤖 Thinking..."):
-            response = handle_user_question(user_question)
-        st.markdown("💬 **Answer:**")
-        st.write(response)
+    # Display chat history using st.chat_message
+    for msg in st.session_state.messages:
+        with st.chat_message(msg["role"]):
+            st.markdown(msg["content"])
+
+    # Input for new question
+    user_input = st.chat_input("Ask a question about the documents")
+
+    if user_input:
+        st.session_state.messages.append({"role": "user", "content": user_input})
+
+        with st.chat_message("user"):
+            st.markdown(user_input)
+
+        with st.chat_message("assistant"):
+            with st.spinner("🤖 Thinking..."):
+                # Build chat history as list of tuples
+                chat_history = [
+                    (msg["content"], st.session_state.messages[i + 1]["content"])
+                    for i, msg in enumerate(st.session_state.messages[:-1])
+                    if msg["role"] == "user"
+                ]
+                
+                response = handle_user_question(user_input, chat_history=chat_history)
+                st.markdown(response)
+
+        st.session_state.messages.append({"role": "assistant", "content": response})
+
