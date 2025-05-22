@@ -2,7 +2,7 @@
 from PyPDF2 import PdfReader
 from langchain.text_splitter import RecursiveCharacterTextSplitter
 from langchain_google_genai import GoogleGenerativeAIEmbeddings, ChatGoogleGenerativeAI
-from langchain.vectorstores import FAISS
+from langchain_community.vectorstores import FAISS
 from langchain.chains.question_answering import load_qa_chain
 from langchain.prompts import PromptTemplate
 from config import GOOGLE_API_KEY
@@ -20,7 +20,7 @@ def get_pdf_text(pdf_docs):
 
 # Split text into chunks for embedding
 def get_text_chunks(text):
-    text_splitter = RecursiveCharacterTextSplitter(chunk_size=10000, chunk_overlap=1000)
+    text_splitter = RecursiveCharacterTextSplitter(chunk_size=5000, chunk_overlap=1000)
     return text_splitter.split_text(text)
 
 
@@ -33,28 +33,41 @@ def save_vector_store(text_chunks):
     vector_store.save_local("faiss_index")
 
 
-# Define conversational QA chain
 def get_conversational_chain():
     prompt_template = """
-    Check the answer correctly in the pdf, sometime the table is complex and jumbled.
-    Answer the question in or two paragraph only.
-    Anser mostly in numbers, and give the one or two liner.
-    Answer the question whatever is inside the PDF.
-    Answer the question based on the context provided.
-    If the answer is not in the context, say "I don't know".
-    If the context is not enough to answer the question, say "I don't know".
-    Answer should not be made up or fabricated.
-    Answer in table foramt if it is in table format in the pdf.
+You are a knowledgeable and professional assistant helping users understand AMC mutual fund fact sheets and financial documents.
 
-    Context: {context}
-    Question: {question}
+Your Responsibilities:
+- Answer only using the information present in the provided PDF context.
+- If the answer involves **data, metrics, comparisons, holdings, fund characteristics, taxation, or categories** — always prefer presenting it in a **markdown table**.
+- If the user uploads **multiple PDFs** and the question indicates a **comparison**, check the context of all PDFs and generate a **side-by-side comparison table** of relevant aspects (e.g., portfolio, performance, fund manager info, etc.).
+- Prioritize extracting content from tables found in the PDFs.
+- After any table, follow up with a **1-2 line concise summary** highlighting key insights or differences.
+- For text-only answers, use **bullet points or numbered lists** where possible.
+- Never assume or infer information not explicitly present in the documents.
+- Maintain a **professional, concise tone** suitable for financial advisory.
+- Keep answers **within 10 lines** unless the table demands more space.
 
-    Answer:
-    """
+---
+
+Context: {context}
+
+Chat History (previous questions and answers to help you stay on-topic):
+{history}
+
+Current Question:
+{question}
+
+Answer (use markdown tables wherever possible):
+"""
+
+
     model = ChatGoogleGenerativeAI(api_key=GOOGLE_API_KEY, model="gemini-2.0-flash")
-    prompt = PromptTemplate(template=prompt_template, input_variables=["context", "question"])
+    prompt = PromptTemplate(
+    template=prompt_template,
+    input_variables=["context", "history", "question"]
+    )
     return load_qa_chain(model, chain_type="stuff", prompt=prompt)
-
 
 # Handle user question
 def handle_user_question(user_question, chat_history=[]):
@@ -64,11 +77,18 @@ def handle_user_question(user_question, chat_history=[]):
     new_db = FAISS.load_local("faiss_index", embeddings, allow_dangerous_deserialization=True)
     docs = new_db.similarity_search(user_question)
 
-    # Combine chat history into a single context string
-    history_context = "\n".join([f"User: {q}\nAI: {a}" for q, a in chat_history])
-    full_prompt = f"{history_context}\nUser: {user_question}" if history_context else user_question
+    # Combine user chat history as a string to retain conversational context
+    history_str = "\n".join([f"User: {q}\nAI: {a}" for q, a in chat_history])
 
     chain = get_conversational_chain()
-    response = chain({"input_documents": docs, "question": full_prompt}, return_only_outputs=True)
+    response = chain(
+        {
+            "input_documents": docs,
+            "history": history_str,
+            "question": user_question
+        },
+        return_only_outputs=True
+    )
     return response["output_text"]
+
 
